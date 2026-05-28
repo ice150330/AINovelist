@@ -1,41 +1,39 @@
 {
   "name": "ainovelist",
   "version": "0.1.0",
-  "description": "一站式 AI 小说生成与创作工作台",
-  "main": "./out/main/index.js",
+  "description": "Local-first AI novel writing desktop workbench",
   "type": "module",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "run-s typecheck build:app",
-    "build:app": "electron-vite build",
-    "preview": "electron-vite preview",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "dev": "tauri dev",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "run-s typecheck build:web tauri:build",
+    "build:web": "vite build",
+    "tauri:build": "tauri build",
+    "typecheck": "run-s typecheck:app typecheck:packages",
+    "typecheck:app": "tsc --noEmit -p tsconfig.app.json",
+    "typecheck:packages": "run-s typecheck:schema typecheck:core",
+    "typecheck:schema": "tsc --noEmit -p packages/schema/tsconfig.json",
+    "typecheck:core": "tsc --noEmit -p packages/core/tsconfig.json",
+    "build:packages": "run-s build:schema build:core",
+    "build:schema": "tsc -p packages/schema/tsconfig.json",
+    "build:core": "tsc -p packages/core/tsconfig.json",
     "test": "vitest run",
-    "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
-    "test:renderer": "vitest run --config vitest.renderer.config.ts"
+    "test:ai": "python services/ai/ainovelist_ai_service.py generate"
   },
   "dependencies": {
-    "gray-matter": "^4.0.3",
-    "markdown-it": "^14.1.0",
-    "minisearch": "^7.1.2",
-    "pinia": "^3.0.4",
-    "sanitize-html": "^2.17.0",
-    "vue": "^3.5.24",
-    "vue-router": "^4.6.3",
+    "@tauri-apps/api": "^2.11.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^22.10.2",
-    "@vitejs/plugin-vue": "^5.2.1",
-    "@vue/test-utils": "^2.4.6",
-    "electron": "^33.2.1",
-    "electron-vite": "^3.0.0",
-    "happy-dom": "^20.9.0",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
     "npm-run-all2": "^7.0.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
-    "vitest": "^2.1.8",
-    "vue-tsc": "^2.1.10"
+    "vitest": "^2.1.8"
   }
 }

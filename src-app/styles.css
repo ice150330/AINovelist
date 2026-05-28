@@ -1,0 +1,214 @@
+:root {
+  font-family: Inter, "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: #352818;
+  background: #f2e4c7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid rgba(139, 91, 33, 0.22);
+  border-radius: 8px;
+  background: #a86f2a;
+  color: #fff8e8;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid rgba(139, 91, 33, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 248, 232, 0.88);
+  color: #352818;
+  padding: 10px 12px;
+}
+
+textarea {
+  min-height: 160px;
+  resize: vertical;
+  line-height: 1.7;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 22px;
+  border-right: 1px solid rgba(139, 91, 33, 0.16);
+  background: rgba(255, 248, 232, 0.78);
+}
+
+.brand {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.brand span {
+  color: #a86f2a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.brand strong {
+  font-size: 18px;
+}
+
+.sidebar button {
+  background: transparent;
+  color: #5a4630;
+  text-align: left;
+}
+
+.sidebar button.active,
+.item.active {
+  background: rgba(168, 111, 42, 0.12);
+  color: #8b5b21;
+}
+
+.content {
+  padding: 28px;
+}
+
+.notice {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #e4f3df;
+  color: #2d5a2e;
+}
+
+.grid,
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.panel {
+  border: 1px solid rgba(139, 91, 33, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 248, 232, 0.84);
+  box-shadow: 0 18px 44px rgba(89, 62, 25, 0.08);
+  padding: 20px;
+}
+
+.hero h1 {
+  margin: 0;
+  max-width: 760px;
+  font-size: clamp(32px, 5vw, 56px);
+  line-height: 1.05;
+}
+
+.eyebrow {
+  color: #a86f2a;
+  font-weight: 800;
+}
+
+.paths {
+  display: grid;
+  gap: 8px;
+}
+
+.paths dd,
+.path {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #6f5b43;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.list,
+.cards {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.item {
+  background: rgba(251, 239, 210, 0.62);
+  color: #352818;
+}
+
+.editor textarea {
+  min-height: 58vh;
+  font-family: "Songti SC", "SimSun", serif;
+  font-size: 16px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.toolbar p,
+.toolbar h2 {
+  margin: 0;
+}
+
+.card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid rgba(139, 91, 33, 0.16);
+  border-radius: 10px;
+  background: rgba(251, 239, 210, 0.6);
+}
+
+.card span {
+  color: #8b5b21;
+  font-size: 12px;
+}
+
+.card p {
+  margin: 0;
+  color: #6f5b43;
+  line-height: 1.6;
+}
+
+.prose pre {
+  white-space: pre-wrap;
+  line-height: 1.75;
+}
+
+@media (max-width: 960px) {
+  .shell,
+  .grid,
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}

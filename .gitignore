@@ -1,36 +1,38 @@
-# 依赖目录
+# Dependencies
 node_modules/
 .pnpm-store/
 
-# 构建产物
+# Build artifacts
 dist/
 dist-electron/
 release/
 out/
 build/
 coverage/
+src-tauri/target/
+src-tauri/gen/
 
-# Vite / Electron 缓存
+# Tool caches
 .vite/
 .cache/
 .eslintcache
 *.tsbuildinfo
 
-# 日志
+# Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# 环境变量与本地配置
+# Environment and local config
 .env
 .env.*
 !.env.example
 *.local
 *.local.json
 
-# IDE 与系统文件
+# IDE and system files
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.example.json
@@ -39,7 +41,7 @@ pnpm-debug.log*
 Thumbs.db
 Desktop.ini
 
-# AINovelist 本地运行数据
+# Local AINovelist runtime data
 workspace/
 knowledge_base/
 models/
@@ -48,7 +50,7 @@ _vectors/
 .backup/
 crash-recovery/
 
-# 大模型与向量文件
+# Large model and vector files
 *.onnx
 *.onnx_data
 *.safetensors
@@ -62,7 +64,7 @@ embeddings.bin
 chunks.json
 manifest.json
 
-# Electron 打包缓存或安装包
+# Desktop packaging outputs
 *.exe
 *.msi
 *.dmg
