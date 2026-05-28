@@ -3,7 +3,10 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['packages/**/*.test.ts'],
+    environmentMatchGlobs: [
+      ['src-app/**/*.test.tsx', 'jsdom']
+    ],
+    include: ['packages/**/*.test.ts', 'src-app/**/*.test.ts', 'src-app/**/*.test.tsx'],
     exclude: ['**/node_modules/**', '**/dist/**']
   },
   resolve: {

@@ -1,4 +1,5 @@
 use chrono::Utc;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
@@ -8,14 +9,41 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_DATA_ROOT: &str = "F:/AINovelistData";
+const DATABASE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppEnvironment {
     workspace_path: String,
     knowledge_base_path: String,
+    database_path: String,
     models_path: String,
     cache_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DatabaseStatus {
+    database_path: String,
+    schema_version: u32,
+    project_count: i64,
+    chapter_count: i64,
+    character_count: i64,
+    knowledge_count: i64,
+    hard_constraint_count: i64,
+    last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DatabaseSyncResult {
+    status: DatabaseStatus,
+    synced_projects: usize,
+    synced_chapters: usize,
+    synced_characters: usize,
+    synced_knowledge: usize,
+    synced_hard_constraints: usize,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -136,6 +164,7 @@ struct KnowledgeEntry {
     title: String,
     category: Option<String>,
     tags: Vec<String>,
+    #[serde(rename = "type")]
     entry_type: Option<String>,
     source_path: Option<String>,
     excerpt: Option<String>,
@@ -227,13 +256,29 @@ fn app_get_environment() -> AppEnvironment {
     AppEnvironment {
         workspace_path: workspace_root().to_string_lossy().to_string(),
         knowledge_base_path: knowledge_root().to_string_lossy().to_string(),
+        database_path: database_path().to_string_lossy().to_string(),
         models_path: Path::new(DEFAULT_DATA_ROOT).join("models").to_string_lossy().to_string(),
         cache_path: Path::new(DEFAULT_DATA_ROOT).join("cache").to_string_lossy().to_string(),
     }
 }
 
 #[tauri::command]
+fn database_status() -> Result<DatabaseStatus, String> {
+    let conn = open_database()?;
+    read_database_status(&conn)
+}
+
+#[tauri::command]
+fn database_sync() -> Result<DatabaseSyncResult, String> {
+    sync_database_from_files()
+}
+
+#[tauri::command]
 fn project_list() -> Result<Vec<Project>, String> {
+    list_projects_from_files()
+}
+
+fn list_projects_from_files() -> Result<Vec<Project>, String> {
     ensure_dir(&workspace_root())?;
     let mut projects = vec![];
     for entry in fs::read_dir(workspace_root()).map_err(to_error)? {
@@ -270,6 +315,7 @@ fn project_create(input: CreateProjectInput) -> Result<ProjectWorkspace, String>
     write_json_atomic(&project_path.join("timeline.json"), &Vec::<Value>::new(), Some(&project_path.join(".backup")))?;
     write_json_atomic(&project_path.join("plots.json"), &Vec::<Value>::new(), Some(&project_path.join(".backup")))?;
     write_json_atomic(&project_path.join("config.json"), &json!({}), Some(&project_path.join(".backup")))?;
+    let _ = sync_database_from_files();
     Ok(ProjectWorkspace { project, chapters: vec![] })
 }
 
@@ -296,6 +342,7 @@ fn chapter_create(input: CreateChapterInput) -> Result<ChapterDocument, String> 
     write_json_atomic(&chapter_meta_path(&input.project_id, &meta.id)?, &meta, Some(&project_path.join(".backup")))?;
     write_text_atomic(&chapter_markdown_path(&input.project_id, &meta.id)?, "", Some(&project_path.join(".backup")))?;
     touch_project(&input.project_id)?;
+    let _ = sync_project_to_database(&input.project_id);
     Ok(ChapterDocument { meta, content: String::new() })
 }
 
@@ -315,6 +362,7 @@ fn chapter_save(input: SaveChapterInput) -> Result<ChapterDocument, String> {
     write_text_atomic(&chapter_markdown_path(&input.project_id, &input.chapter_id)?, &input.content, Some(&backup))?;
     write_json_atomic(&meta_path, &meta, Some(&backup))?;
     touch_project(&input.project_id)?;
+    let _ = sync_project_to_database(&input.project_id);
     Ok(ChapterDocument { meta, content: input.content })
 }
 
@@ -343,6 +391,7 @@ fn character_create(input: CreateCharacterInput) -> Result<Character, String> {
     characters.push(character.clone());
     write_json_atomic(&project_path(&input.project_id)?.join("characters.json"), &characters, Some(&project_path(&input.project_id)?.join(".backup")))?;
     touch_project(&input.project_id)?;
+    let _ = sync_project_to_database(&input.project_id);
     Ok(character)
 }
 
@@ -355,6 +404,7 @@ fn character_delete(input: DeleteCharacterInput) -> Result<(), String> {
         return Err("人物不存在".to_string());
     }
     write_json_atomic(&project_path(&input.project_id)?.join("characters.json"), &characters, Some(&project_path(&input.project_id)?.join(".backup")))?;
+    let _ = sync_project_to_database(&input.project_id);
     touch_project(&input.project_id)
 }
 
@@ -397,6 +447,7 @@ fn memory_create_hard_constraint(input: CreateHardConstraintInput) -> Result<Har
     constraints.push(constraint.clone());
     write_memory_file(&input.project_id, "hard_constraints.json", &constraints)?;
     touch_project(&input.project_id)?;
+    let _ = sync_project_to_database(&input.project_id);
     Ok(constraint)
 }
 
@@ -405,6 +456,7 @@ fn memory_delete_hard_constraint(input: DeleteHardConstraintInput) -> Result<(),
     let mut constraints = memory_list_hard_constraints(ListMemoryInput { project_id: input.project_id.clone() })?;
     constraints.retain(|item| item.id != input.constraint_id);
     write_memory_file(&input.project_id, "hard_constraints.json", &constraints)?;
+    let _ = sync_project_to_database(&input.project_id);
     touch_project(&input.project_id)
 }
 
@@ -446,6 +498,8 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             app_get_environment,
+            database_status,
+            database_sync,
             project_list,
             project_create,
             project_open,
@@ -467,11 +521,305 @@ fn main() {
 }
 
 fn workspace_root() -> PathBuf {
-    Path::new(DEFAULT_DATA_ROOT).join("workspace")
+    data_root().join("workspace")
 }
 
 fn knowledge_root() -> PathBuf {
-    Path::new(DEFAULT_DATA_ROOT).join("knowledge_base")
+    data_root().join("knowledge_base")
+}
+
+fn data_root() -> PathBuf {
+    Path::new(DEFAULT_DATA_ROOT).to_path_buf()
+}
+
+fn database_path() -> PathBuf {
+    data_root().join("ainovelist.db")
+}
+
+fn open_database() -> Result<Connection, String> {
+    ensure_dir(&data_root())?;
+    let conn = Connection::open(database_path()).map_err(to_error)?;
+    initialize_database(&conn)?;
+    Ok(conn)
+}
+
+fn initialize_database(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "
+        PRAGMA foreign_keys = ON;
+        PRAGMA journal_mode = WAL;
+        CREATE TABLE IF NOT EXISTS app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            schema_version INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS chapters (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            schema_version INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            chapter_order INTEGER NOT NULL,
+            content_path TEXT NOT NULL,
+            word_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_chapters_project_order ON chapters(project_id, chapter_order);
+        CREATE TABLE IF NOT EXISTS characters (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            schema_version INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            aliases_json TEXT NOT NULL,
+            tags_json TEXT NOT NULL,
+            appearance TEXT NOT NULL,
+            motivation TEXT NOT NULL,
+            notes TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_characters_project_role ON characters(project_id, role);
+        CREATE TABLE IF NOT EXISTS hard_constraints (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            constraint_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            source TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_constraints_project_priority ON hard_constraints(project_id, priority);
+        CREATE TABLE IF NOT EXISTS knowledge_entries (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            category TEXT,
+            tags_json TEXT NOT NULL,
+            entry_type TEXT,
+            source_path TEXT,
+            excerpt TEXT,
+            updated_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge_entries(category);
+        ",
+    ).map_err(to_error)?;
+    conn.execute(
+        "INSERT INTO app_meta (key, value) VALUES ('schema_version', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![DATABASE_SCHEMA_VERSION.to_string()],
+    ).map_err(to_error)?;
+    Ok(())
+}
+
+fn read_database_status(conn: &Connection) -> Result<DatabaseStatus, String> {
+    let schema_version = read_meta(conn, "schema_version")?.and_then(|value| value.parse::<u32>().ok()).unwrap_or(DATABASE_SCHEMA_VERSION);
+    Ok(DatabaseStatus {
+        database_path: database_path().to_string_lossy().to_string(),
+        schema_version,
+        project_count: count_rows(conn, "projects")?,
+        chapter_count: count_rows(conn, "chapters")?,
+        character_count: count_rows(conn, "characters")?,
+        knowledge_count: count_rows(conn, "knowledge_entries")?,
+        hard_constraint_count: count_rows(conn, "hard_constraints")?,
+        last_synced_at: read_meta(conn, "last_synced_at")?,
+    })
+}
+
+fn sync_database_from_files() -> Result<DatabaseSyncResult, String> {
+    let conn = open_database()?;
+    let mut warnings = vec![];
+    let mut synced_projects = 0;
+    let mut synced_chapters = 0;
+    let mut synced_characters = 0;
+    let mut synced_hard_constraints = 0;
+
+    for project in list_projects_from_files()? {
+        match open_project(&project.id) {
+            Ok(workspace) => {
+                let result = sync_project_snapshot(&conn, &workspace)?;
+                synced_projects += 1;
+                synced_chapters += result.0;
+                synced_characters += result.1;
+                synced_hard_constraints += result.2;
+            }
+            Err(error) => warnings.push(format!("跳过作品 {}：{}", project.id, error)),
+        }
+    }
+
+    let synced_knowledge = sync_knowledge_to_database(&conn, &mut warnings)?;
+    set_meta(&conn, "last_synced_at", &now_iso())?;
+    let status = read_database_status(&conn)?;
+    Ok(DatabaseSyncResult {
+        status,
+        synced_projects,
+        synced_chapters,
+        synced_characters,
+        synced_knowledge,
+        synced_hard_constraints,
+        warnings,
+    })
+}
+
+fn sync_project_to_database(project_id: &str) -> Result<(), String> {
+    let conn = open_database()?;
+    let workspace = open_project(project_id)?;
+    sync_project_snapshot(&conn, &workspace)?;
+    set_meta(&conn, "last_synced_at", &now_iso())
+}
+
+fn sync_project_snapshot(conn: &Connection, workspace: &ProjectWorkspace) -> Result<(usize, usize, usize), String> {
+    conn.execute(
+        "INSERT INTO projects (id, schema_version, name, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+            schema_version = excluded.schema_version,
+            name = excluded.name,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at",
+        params![
+            workspace.project.id,
+            workspace.project.schema_version,
+            workspace.project.name,
+            workspace.project.created_at,
+            workspace.project.updated_at,
+        ],
+    ).map_err(to_error)?;
+
+    conn.execute("DELETE FROM chapters WHERE project_id = ?1", params![workspace.project.id]).map_err(to_error)?;
+    conn.execute("DELETE FROM characters WHERE project_id = ?1", params![workspace.project.id]).map_err(to_error)?;
+    conn.execute("DELETE FROM hard_constraints WHERE project_id = ?1", params![workspace.project.id]).map_err(to_error)?;
+
+    for chapter in &workspace.chapters {
+        let content_path = chapter_markdown_path(&workspace.project.id, &chapter.id)?;
+        let content = fs::read_to_string(&content_path).unwrap_or_default();
+        conn.execute(
+            "INSERT INTO chapters (id, project_id, schema_version, title, chapter_order, content_path, word_count, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                chapter.id,
+                workspace.project.id,
+                chapter.schema_version,
+                chapter.title,
+                chapter.order,
+                content_path.to_string_lossy().to_string(),
+                count_words(&content) as i64,
+                chapter.created_at,
+                chapter.updated_at,
+            ],
+        ).map_err(to_error)?;
+    }
+
+    let characters = character_list(ListCharactersInput { project_id: workspace.project.id.clone() }).unwrap_or_default();
+    for character in &characters {
+        conn.execute(
+            "INSERT INTO characters (id, project_id, schema_version, name, role, aliases_json, tags_json, appearance, motivation, notes, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                character.id,
+                workspace.project.id,
+                character.schema_version,
+                character.name,
+                character.role,
+                serde_json::to_string(&character.aliases).map_err(to_error)?,
+                serde_json::to_string(&character.tags).map_err(to_error)?,
+                character.appearance,
+                character.motivation,
+                character.notes,
+                character.created_at,
+                character.updated_at,
+            ],
+        ).map_err(to_error)?;
+    }
+
+    let constraints = memory_list_hard_constraints(ListMemoryInput { project_id: workspace.project.id.clone() }).unwrap_or_default();
+    for constraint in &constraints {
+        conn.execute(
+            "INSERT INTO hard_constraints (id, project_id, constraint_type, content, priority, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                constraint.id,
+                workspace.project.id,
+                constraint.constraint_type,
+                constraint.content,
+                constraint.priority,
+                constraint.source,
+            ],
+        ).map_err(to_error)?;
+    }
+
+    Ok((workspace.chapters.len(), characters.len(), constraints.len()))
+}
+
+fn sync_knowledge_to_database(conn: &Connection, warnings: &mut Vec<String>) -> Result<usize, String> {
+    ensure_dir(&knowledge_root())?;
+    let mut synced = 0;
+    for path in list_markdown_files(&knowledge_root())? {
+        match read_knowledge_entry(&path) {
+            Ok(entry) => {
+                conn.execute(
+                    "INSERT INTO knowledge_entries (id, title, category, tags_json, entry_type, source_path, excerpt, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT(id) DO UPDATE SET
+                        title = excluded.title,
+                        category = excluded.category,
+                        tags_json = excluded.tags_json,
+                        entry_type = excluded.entry_type,
+                        source_path = excluded.source_path,
+                        excerpt = excluded.excerpt,
+                        updated_at = excluded.updated_at",
+                    params![
+                        entry.id,
+                        entry.title,
+                        entry.category,
+                        serde_json::to_string(&entry.tags).map_err(to_error)?,
+                        entry.entry_type,
+                        entry.source_path,
+                        entry.excerpt,
+                        entry.updated_at,
+                    ],
+                ).map_err(to_error)?;
+                synced += 1;
+            }
+            Err(error) => warnings.push(format!("跳过知识文件 {}：{}", path.to_string_lossy(), error)),
+        }
+    }
+    Ok(synced)
+}
+
+fn count_rows(conn: &Connection, table_name: &str) -> Result<i64, String> {
+    let sql = format!("SELECT COUNT(*) FROM {table_name}");
+    conn.query_row(&sql, [], |row| row.get(0)).map_err(to_error)
+}
+
+fn read_meta(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    let mut statement = conn.prepare("SELECT value FROM app_meta WHERE key = ?1").map_err(to_error)?;
+    let mut rows = statement.query(params![key]).map_err(to_error)?;
+    if let Some(row) = rows.next().map_err(to_error)? {
+        Ok(Some(row.get(0).map_err(to_error)?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO app_meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    ).map_err(to_error)?;
+    Ok(())
+}
+
+fn count_words(value: &str) -> usize {
+    value.chars().filter(|c| !c.is_whitespace()).count()
 }
 
 fn open_project(project_id: &str) -> Result<ProjectWorkspace, String> {

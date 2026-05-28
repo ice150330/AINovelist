@@ -1,8 +1,30 @@
 export interface AppEnvironment {
   workspacePath: string
   knowledgeBasePath: string
+  databasePath: string
   modelsPath: string
   cachePath: string
+}
+
+export interface DatabaseStatus {
+  databasePath: string
+  schemaVersion: number
+  projectCount: number
+  chapterCount: number
+  characterCount: number
+  knowledgeCount: number
+  hardConstraintCount: number
+  lastSyncedAt?: string
+}
+
+export interface DatabaseSyncResult {
+  status: DatabaseStatus
+  syncedProjects: number
+  syncedChapters: number
+  syncedCharacters: number
+  syncedKnowledge: number
+  syncedHardConstraints: number
+  warnings: string[]
 }
 
 export interface Project {
